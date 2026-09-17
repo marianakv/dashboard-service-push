@@ -93,15 +93,18 @@ def montar_dados(
             "benchmark_taxa": None,
             "benchmark_direcao": None,
             "cor": "#3b82f6",
-            # Campos que precisam de consultas adicionais de Mixpanel (ver
-            # docstring do módulo) — deixados com placeholder honesto em vez
-            # de dado inventado:
-            "pico": None, "mes_pico": None, "ultimo_mes_valor": None, "ultimo_mes_label": None,
-            "acesso_unico_pct": None, "acesso_recorrente_pct": None,
-            "at_engajamento_pct": None, "at_engajamento_n": None,
-            "tendencia_mensal": [],
-            "funil_viu_login": None, "funil_iniciou_sessao": None,
-            "funil_conversao_pct": None, "funil_amostra_pequena": None,
+            # Campos que precisam de consultas adicionais de Mixpanel ainda não
+            # implementadas (ver README, "Escopo declarado"). Valores-placeholder
+            # SEGUROS pro template — nunca None nesses campos específicos, porque
+            # o template formata alguns deles como número/data e None quebra o
+            # render (era o bug: "%.1f"|format(None) derrubava a geração com 500).
+            # Dado real vem só depois que as consultas forem escritas.
+            "pico": 0, "mes_pico": "—", "ultimo_mes_valor": 0, "ultimo_mes_label": "—",
+            "acesso_unico_pct": 0, "acesso_recorrente_pct": 0,
+            "at_engajamento_pct": 0, "at_engajamento_n": 0,
+            "tendencia_mensal": [0] * 14,
+            "funil_viu_login": 0, "funil_iniciou_sessao": 0,
+            "funil_conversao_pct": 0.0, "funil_amostra_pequena": True,
         }
 
         if claude and not emp["observacao"]:
@@ -122,7 +125,7 @@ def montar_dados(
         "cliente": cliente,
         "janela_label": f"{from_date} a {to_date}",
         "janela_curta": f"{from_date} a {to_date}",
-        "meses": [],  # requer a série mensal por empreendimento — ver escopo declarado
+        "meses": _meses_entre(from_date, to_date),
         "total_usuarios": sum(e["usuarios_unicos"] for e in empreendimentos),
         "destaque_stat": None,
         "empreendimentos": empreendimentos,
@@ -132,7 +135,26 @@ def montar_dados(
         "top10_usuarios": [],
         "segmentos": claude.gerar_leitura_segmento(empreendimentos) if claude else [],
     }
+    # tendencia_mensal ainda é placeholder ([0]*14) — ajusta pro tamanho real
+    # da janela em vez de assumir 14 meses fixos, pra não descasar do eixo X.
+    for e in empreendimentos:
+        e["tendencia_mensal"] = [0] * len(dados["meses"])
     return dados
+
+
+def _meses_entre(from_date: str, to_date: str) -> list[str]:
+    """Gera rótulos mês/ano (ex.: 'jun/25') entre duas datas AAAA-MM-DD, inclusive."""
+    inicio = datetime.date.fromisoformat(from_date).replace(day=1)
+    fim = datetime.date.fromisoformat(to_date).replace(day=1)
+    meses = []
+    atual = inicio
+    while atual <= fim:
+        meses.append(f"{MESES_PT[atual.month - 1]}/{str(atual.year)[2:]}")
+        if atual.month == 12:
+            atual = atual.replace(year=atual.year + 1, month=1)
+        else:
+            atual = atual.replace(month=atual.month + 1)
+    return meses
 
 
 def _formatar_data_pt(iso_date: str) -> str:
