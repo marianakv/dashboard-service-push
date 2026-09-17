@@ -1,11 +1,7 @@
 services:
   dashboard-service:
     build: .
-    ports:
-      - "8000:8000"
+    network_mode: "host"
     env_file:
       - .env
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
     restart: unless-stopped
