@@ -60,7 +60,11 @@ class MixpanelClient:
         import json as _json
         resp = httpx.post(
             f"{self.base_url}/jql",
-            data={"script": script, "params": _json.dumps(params)},
+            data={
+                "script": script,
+                "params": _json.dumps(params),
+                "project_id": self.project_id,  # exigido p/ Service Account auth — faltava aqui, só estava no get_insights_report
+            },
             auth=self._auth(),
             timeout=110,  # JQL pode rodar até 2min segundo a documentação da Mixpanel
         )
