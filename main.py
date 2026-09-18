@@ -18,6 +18,7 @@ provado vs. o que precisa de teste com credenciais reais.
 """
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
+import httpx
 
 from app.generator import montar_dados, renderizar
 
@@ -39,6 +40,15 @@ def _gerar(cliente: str, from_date: str, to_date: str, usar_claude: bool) -> HTM
         dados = montar_dados(cliente, from_date, to_date, usar_claude_para_narrativa=usar_claude)
     except KeyError as e:
         raise HTTPException(status_code=500, detail=f"Variável de ambiente ausente: {e}")
+    except httpx.HTTPStatusError as e:
+        # Mostra o corpo real da resposta de erro (Mixpanel/Notion costumam
+        # explicar o motivo ali) em vez de só o código de status — sem isso
+        # fica impossível diagnosticar sem adivinhar.
+        corpo = e.response.text[:500] if e.response is not None else ""
+        raise HTTPException(
+            status_code=502,
+            detail=f"Falha consultando fonte de dados: {e}\nResposta do servidor: {corpo}",
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Falha consultando fonte de dados: {e}")
 
