@@ -62,7 +62,12 @@ class MixpanelClient:
         return results
 
     def fetch_event_export(self, event_name: str, from_date: str, to_date: str) -> list[dict]:
-        """Eventos brutos no período. Espelha fetch_event_export() do script do VS Code."""
+        """
+        Eventos brutos no período. Domínio diferente de propósito — export
+        de evento bruto vive em data.mixpanel.com, não em mixpanel.com onde
+        ficam /engage e as outras rotas do Query API. Confirmado por
+        tentativa real: mixpanel.com/api/2.0/export -> "Invalid API endpoint".
+        """
         params = {
             "project_id": self.project_id,
             "event": json.dumps([event_name]),
@@ -70,7 +75,7 @@ class MixpanelClient:
             "to_date": to_date,
             "format": "json",
         }
-        resp = httpx.get(f"{API_BASE}/export", auth=self._auth(), params=params, timeout=60)
+        resp = httpx.get("https://data.mixpanel.com/api/2.0/export", auth=self._auth(), params=params, timeout=60)
         resp.raise_for_status()
         linhas = [l for l in resp.text.splitlines() if l.strip()]
         return [json.loads(l) for l in linhas]
