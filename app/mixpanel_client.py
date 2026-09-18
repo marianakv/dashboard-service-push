@@ -1,101 +1,103 @@
 """
-Cliente real da Query API do Mixpanel — Service Account (Basic Auth),
-conforme https://docs.mixpanel.com/reference/query-api-authentication.
+Cliente real da API do Mixpanel — Service Account (Basic Auth), usando os
+MESMOS endpoints e nomes de variável de ambiente já comprovados funcionando
+na ferramenta Python que já existe no VS Code da Predialize.
 
-NÃO TESTADO contra a API real nesta sessão: não há credenciais de Service
-Account disponíveis no sandbox onde este código foi escrito. A implementação
-segue a documentação oficial (verificada em set/2026), mas precisa de um
-primeiro teste real com as credenciais da Predialize antes de confiar em
-produção — ver README.md, seção "O que está provado vs. o que não está".
+Histórico: a primeira versão deste arquivo usava a "Query API" mais nova
+(/api/query/jql e /api/query/insights) — essas retornaram 402 Payment
+Required no plano Free da Predialize. A ferramenta que já funciona usa uma
+API mais antiga (/api/2.0/engage, /api/2.0/segmentation, /api/2.0/export),
+que continua disponível no Free. Reescrito em cima desses três endpoints.
 
-MÉTODO PRIMÁRIO — get_insights_report(bookmark_id): consulta um relatório
-Insights já salvo no Mixpanel. É o método que a própria Mixpanel recomenda
-ativamente hoje. A Predialize já tem relatórios salvos reaproveitáveis (ex.:
-"Acessos no Mês (MAU)", bookmark_id 9944705, criado por Amanda Saito) —
-o caminho mais seguro é: alguém com acesso ao Mixpanel salva um relatório
-Insights por métrica precisada (breakdown por Enterprise, por exemplo), e
-o serviço só consulta pelo bookmark_id.
-
-MÉTODO SECUNDÁRIO, COM RESSALVA — run_jql(): a Mixpanel marca JQL como "em
-manutenção" e antes tinha uma data de desligamento completo anunciada pra
-31/dez/2025 — essa data foi removida da documentação depois (visto num
-histórico de commit da doc oficial), o que sugere que não desligaram como
-planejado, mas não há garantia. Testar isso com uma chamada real ANTES de
-depender dele pra qualquer coisa importante. Mantido aqui porque replica as
-consultas ad-hoc (breakdown por Enterprise, funil, frequência por usuário)
-que foram feitas manualmente ao longo deste projeto e que não têm um
-relatório salvo equivalente ainda.
+NÃO TESTADO CONTRA A API REAL NESTA SESSÃO — segue exatamente o padrão do
+script já comprovado (mesmo API_BASE, mesmos nomes de variável, mesma auth),
+mas eu não rodei isso com credencial real. Ver README.
 """
 import os
+import json
 import httpx
+
+API_BASE = "https://mixpanel.com/api/2.0"
+
+CREDENTIALS = {
+    "MIXPANEL": ("MIXPANEL_USERNAME", "MIXPANEL_SECRET", "MIXPANEL_PROJECT_ID"),
+    "APP": ("APP_USERNAME", "APP_SECRET", "APP_PROJECT_ID"),
+    "ADMIN": ("ADMIN_USERNAME", "ADMIN_SECRET", "ADMIN_PROJECT_ID"),
+}
 
 
 class MixpanelClient:
-    def __init__(
-        self,
-        service_account_username: str | None = None,
-        service_account_secret: str | None = None,
-        project_id: str | None = None,
-        region: str = "mixpanel",  # "mixpanel" (US) | "eu.mixpanel" | "in.mixpanel"
-    ):
-        self.username = service_account_username or os.environ["MIXPANEL_SERVICE_ACCOUNT_USERNAME"]
-        self.secret = service_account_secret or os.environ["MIXPANEL_SERVICE_ACCOUNT_SECRET"]
-        self.project_id = project_id or os.environ["MIXPANEL_PROJECT_ID"]
-        self.base_url = f"https://{region}.com/api/query"
+    def __init__(self, source: str = "APP"):
+        source = source.upper()
+        if source not in CREDENTIALS:
+            raise ValueError(f"Fonte inválida: {source}. Use MIXPANEL, APP ou ADMIN.")
+        username_var, secret_var, project_var = CREDENTIALS[source]
+        self.username = os.environ[username_var]
+        self.secret = os.environ[secret_var]
+        self.project_id = os.environ[project_var]
 
     def _auth(self):
         return (self.username, self.secret)
 
-    def get_insights_report(self, bookmark_id: str, workspace_id: str | None = None) -> dict:
-        """MÉTODO RECOMENDADO. Consulta um relatório Insights salvo pelo bookmark_id."""
-        params = {"project_id": self.project_id, "bookmark_id": bookmark_id}
-        if workspace_id:
-            params["workspace_id"] = workspace_id
-        resp = httpx.get(f"{self.base_url}/insights", params=params, auth=self._auth(), timeout=60)
-        resp.raise_for_status()
-        return resp.json()
+    def fetch_people(self, limit: int = 1000) -> list[dict]:
+        """Todos os perfis do projeto, paginado. Espelha fetch_people() do script do VS Code."""
+        results = []
+        page = 0
+        while True:
+            params = {"project_id": self.project_id, "limit": limit, "page": page}
+            resp = httpx.get(f"{API_BASE}/engage", auth=self._auth(), params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            page_results = data.get("results", [])
+            if not page_results:
+                break
+            results.extend(page_results)
+            if len(page_results) < limit:
+                break
+            page += 1
+        return results
 
-    def run_jql(self, script: str, params: dict) -> list:
-        """MÉTODO SECUNDÁRIO — ver aviso de maintenance mode no docstring do módulo."""
-        import json as _json
-        resp = httpx.post(
-            f"{self.base_url}/jql",
-            data={
-                "script": script,
-                "params": _json.dumps(params),
-                "project_id": self.project_id,  # exigido p/ Service Account auth — faltava aqui, só estava no get_insights_report
-            },
-            auth=self._auth(),
-            timeout=110,  # JQL pode rodar até 2min segundo a documentação da Mixpanel
-        )
+    def fetch_event_export(self, event_name: str, from_date: str, to_date: str) -> list[dict]:
+        """Eventos brutos no período. Espelha fetch_event_export() do script do VS Code."""
+        params = {
+            "project_id": self.project_id,
+            "event": json.dumps([event_name]),
+            "from_date": from_date,
+            "to_date": to_date,
+            "format": "json",
+        }
+        resp = httpx.get(f"{API_BASE}/export", auth=self._auth(), params=params, timeout=60)
         resp.raise_for_status()
-        return resp.json()
+        linhas = [l for l in resp.text.splitlines() if l.strip()]
+        return [json.loads(l) for l in linhas]
 
     def usuarios_unicos_por_empreendimento(self, empresa: str, from_date: str, to_date: str) -> dict:
         """
-        Réplica em JQL da consulta que foi rodada manualmente (via MCP) ao
-        longo deste projeto: usuários únicos do evento $session_start,
-        quebrado pela propriedade de perfil "Enterprise", filtrado por
-        "Company" = empresa. Só usar depois de confirmar que o endpoint JQL
-        ainda responde (ver aviso no topo do arquivo).
+        Substitui a consulta que antes ia via JQL. Estratégia: busca os
+        perfis (People) da empresa via /engage, monta distinct_id ->
+        Enterprise; busca os eventos $session_start brutos via /export;
+        junta os dois em Python, contando distinct_id únicos por Enterprise.
+        Só conta usuários que aparecem nos perfis da empresa — evento de
+        alguém fora da empresa é ignorado mesmo que apareça no export.
+        """
+        perfis = self.fetch_people()
+        distinct_id_para_enterprise = {}
+        for p in perfis:
+            props = p.get("$properties", {})
+            if props.get("Company") == empresa:
+                did = p.get("$distinct_id")
+                enterprise = props.get("Enterprise")
+                if did and enterprise:
+                    distinct_id_para_enterprise[did] = enterprise
 
-        Retorna {nome_do_empreendimento: usuarios_unicos}.
-        """
-        script = """
-        function main() {
-          return join(
-            Events({
-              from_date: params.from_date,
-              to_date: params.to_date,
-              event_selectors: [{event: "$session_start"}]
-            }),
-            People(),
-            {type: "inner", selectors: [{selector: 'user["Company"] == "' + params.empresa + '"'}]}
-          )
-          .groupByUser(["user.properties.Enterprise"], mixpanel.reducer.null())
-          .groupBy(["key.1"], mixpanel.reducer.count());
-        }
-        """
-        params = {"from_date": from_date, "to_date": to_date, "empresa": empresa}
-        rows = self.run_jql(script, params)
-        return {row["key"][0]: row["value"] for row in rows if row["key"][0]}
+        eventos = self.fetch_event_export("$session_start", from_date, to_date)
+
+        usuarios_por_enterprise = {}
+        for e in eventos:
+            did = e.get("properties", {}).get("distinct_id") or e.get("distinct_id")
+            enterprise = distinct_id_para_enterprise.get(did)
+            if enterprise:
+                usuarios_por_enterprise.setdefault(enterprise, set()).add(did)
+
+        return {k: len(v) for k, v in usuarios_por_enterprise.items()}
+
