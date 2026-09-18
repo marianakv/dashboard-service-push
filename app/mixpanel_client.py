@@ -40,14 +40,18 @@ class MixpanelClient:
         return (self.username, self.secret)
 
     def fetch_people(self, limit: int = 1000) -> list[dict]:
-        """Todos os perfis do projeto, paginado. Espelha fetch_people() do script do VS Code."""
+        """Todos os perfis do projeto, paginado. Requer session_id nas páginas após a primeira."""
         results = []
         page = 0
+        session_id = None
         while True:
             params = {"project_id": self.project_id, "limit": limit, "page": page}
+            if session_id:
+                params["session_id"] = session_id
             resp = httpx.get(f"{API_BASE}/engage", auth=self._auth(), params=params, timeout=30)
             resp.raise_for_status()
             data = resp.json()
+            session_id = data.get("session_id", session_id)
             page_results = data.get("results", [])
             if not page_results:
                 break
