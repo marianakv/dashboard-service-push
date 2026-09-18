@@ -82,12 +82,12 @@ class MixpanelClient:
 
     def usuarios_unicos_por_empreendimento(self, empresa: str, from_date: str, to_date: str) -> dict:
         """
-        Substitui a consulta que antes ia via JQL. Estratégia: busca os
-        perfis (People) da empresa via /engage, monta distinct_id ->
-        Enterprise; busca os eventos $session_start brutos via /export;
-        junta os dois em Python, contando distinct_id únicos por Enterprise.
-        Só conta usuários que aparecem nos perfis da empresa — evento de
-        alguém fora da empresa é ignorado mesmo que apareça no export.
+        Estratégia: busca os perfis (People) da empresa via /engage, monta
+        distinct_id -> Enterprise; busca os eventos $session_start brutos
+        via /export; junta os dois em Python, contando distinct_id únicos
+        por Enterprise. Só conta usuários que aparecem nos perfis da
+        empresa — evento de alguém fora da empresa é ignorado mesmo que
+        apareça no export.
         """
         perfis = self.fetch_people()
         distinct_id_para_enterprise = {}
@@ -102,11 +102,24 @@ class MixpanelClient:
         eventos = self.fetch_event_export("$session_start", from_date, to_date)
 
         usuarios_por_enterprise = {}
+        eventos_com_match = 0
         for e in eventos:
             did = e.get("properties", {}).get("distinct_id") or e.get("distinct_id")
             enterprise = distinct_id_para_enterprise.get(did)
             if enterprise:
+                eventos_com_match += 1
                 usuarios_por_enterprise.setdefault(enterprise, set()).add(did)
+
+        # Diagnóstico — imprime no log do container pra ver em qual etapa a
+        # contagem está zerando, em vez de só devolver {} silenciosamente.
+        print(f"[mixpanel_client] perfis totais buscados: {len(perfis)}")
+        print(f"[mixpanel_client] perfis com Company == {empresa!r}: {len(distinct_id_para_enterprise)}")
+        if perfis[:1]:
+            print(f"[mixpanel_client] exemplo de $properties de 1 perfil: {perfis[0].get('$properties', {})}")
+        print(f"[mixpanel_client] eventos $session_start totais buscados: {len(eventos)}")
+        if eventos[:1]:
+            print(f"[mixpanel_client] exemplo de 1 evento bruto: {eventos[0]}")
+        print(f"[mixpanel_client] eventos que bateram com algum distinct_id da empresa: {eventos_com_match}")
 
         return {k: len(v) for k, v in usuarios_por_enterprise.items()}
 
