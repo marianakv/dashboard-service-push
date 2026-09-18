@@ -38,11 +38,9 @@ class MixpanelClient:
         project_id: str | None = None,
         region: str = "mixpanel",  # "mixpanel" (US) | "eu.mixpanel" | "in.mixpanel"
     ):
-        # Nomes alinhados com a convenção que já existe no ambiente da
-        # Predialize (mesmo .env usado no VS Code) — projeto "App":
-        self.username = service_account_username or os.environ["APP_USERNAME"]
-        self.secret = service_account_secret or os.environ["APP_SECRET"]
-        self.project_id = project_id or os.environ["APP_PROJECT_ID"]
+        self.username = service_account_username or os.environ["MIXPANEL_SERVICE_ACCOUNT_USERNAME"]
+        self.secret = service_account_secret or os.environ["MIXPANEL_SERVICE_ACCOUNT_SECRET"]
+        self.project_id = project_id or os.environ["MIXPANEL_PROJECT_ID"]
         self.base_url = f"https://{region}.com/api/query"
 
     def _auth(self):
